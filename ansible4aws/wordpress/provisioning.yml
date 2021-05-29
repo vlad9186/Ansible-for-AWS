@@ -1,0 +1,75 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    #my region
+    region: us-east-1
+    keyname: wordpress-useast
+    #my ip address
+    allowed_ip: 188.163.22.202/32
+    instance_type: t2.micro
+    image: ami-0d5eff06f840b45e9
+  tasks:
+    - name: create key pair
+      tags: keypair
+      ec2_key:
+        region: "{{ region }}"
+        name: "{{ keyname }}"
+      register: mykey
+      
+    - name: write the private key to file
+      copy: content="{{ mykey.key.private_key }}" dest="~/.ssh/{{ keyname }}.pem" mode=0600
+      when: mykey.changed
+    
+    - name: create security group
+      tags: sg
+      ec2_group:
+        region: "{{ region }}"
+        #my security group name
+        name: sg_wordpress_useast
+        description: security group for useast webserver host
+        rules:
+          # allow ssh sccess from my ip address
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: "{{ allowed_ip }}"
+          # allow http access from anywhere
+          - proto: tcp
+            from_port: 80
+            to_port: 80
+            cidr_ip: 0.0.0.0/0
+          # allow https access from anywhere
+          - proto: tcp
+            from_port: 443
+            to_port: 443
+            cidr_ip: 0.0.0.0/0
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0         
+   
+    - name: launch ec2 instance 
+      tags: ec2
+      ec2: 
+        region: "{{ region }}"
+        key_name: "{{ keyname }}"
+        instance_type: "{{ instance_type }}"
+        image: "{{ image }}"
+        wait: yes
+        group: sg_wordpress_useast
+        id: wordpress_launch_75
+        instance_tags:
+          Name: wordpress-1
+          class: wordpress
+      register: ec2
+     
+    - name: associate new EIP for the instance
+      tags: eip
+      ec2_eip:
+        region: "{{ region }}"
+        device_id: "{{ item.id }}"
+        in_vpc: yes
+      with_items: "{{ ec2.instances }}"
+      when: item.id is defined
+
